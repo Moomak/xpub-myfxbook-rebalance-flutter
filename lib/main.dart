@@ -48,6 +48,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   bool _areEssentialSettingsConfigured = false;
   String btcBalance = "N/A";
   String myfxbookBalance = "N/A";
+  String myfxbookEquity = "N/A"; // Added for Myfxbook Equity
+  String myfxbookDrawdown = "N/A"; // Added for Myfxbook Drawdown
+  String btcBalanceInUsd = "N/A"; // Added for BTC Balance in USD
   String btcTargetCurrencyRate = "N/A"; // Updated name for clarity
   String usdtTargetCurrencyRate = "N/A"; // Updated name for clarity
   String totalPortfolioValueUsdt = "N/A";
@@ -60,6 +63,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   // Numeric state variables for calculations
   double? _numericBtcBalance;
   double? _numericMyfxbookBalance;
+  double? _numericMyfxbookEquity; // Added for Myfxbook Equity
+  double? _numericMyfxbookDrawdown; // Added for Myfxbook Drawdown
   double? _numericBtcTargetCurrencyRate;
   // double? _numericUsdtTargetCurrencyRate; // For consistency if used later
 
@@ -139,6 +144,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           // Reset UI fields to "N/A" or placeholder messages
           btcBalance = "N/A";
           myfxbookBalance = "N/A";
+          myfxbookEquity = "N/A";
+          myfxbookDrawdown = "N/A";
+          btcBalanceInUsd = "N/A";
           btcTargetCurrencyRate = "N/A";
           usdtTargetCurrencyRate = "N/A";
           totalPortfolioValueUsdt = "N/A";
@@ -152,6 +160,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           // Reset numeric values as well
           _numericBtcBalance = null;
           _numericMyfxbookBalance = null;
+          _numericMyfxbookEquity = null;
+          _numericMyfxbookDrawdown = null;
           _numericBtcTargetCurrencyRate = null;
         });
       }
@@ -181,17 +191,54 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
     }
 
     try {
-      // 1. Fetch Myfxbook Balance
-      final myfxBalanceNum = await _myfxbookService.getAccountBalance();
-      _numericMyfxbookBalance = myfxBalanceNum; // Store numeric value
-      if (mounted) {
-        setState(() {
-          myfxbookBalance = _formatNumber(myfxBalanceNum, 2);
-        });
-      }
-      if (myfxBalanceNum == null)
-        developer.log("Failed to fetch Myfxbook balance.",
+      // 1. Fetch Myfxbook Account Details
+      final myfxAccountDetails = await _myfxbookService.getAccountDetails();
+
+      if (myfxAccountDetails != null) {
+        _numericMyfxbookBalance = myfxAccountDetails['balance'] as double?;
+        _numericMyfxbookEquity = myfxAccountDetails['equity'] as double?;
+
+        // Calculate Drawdown from Balance and Equity
+        if (_numericMyfxbookBalance != null &&
+            _numericMyfxbookEquity != null &&
+            _numericMyfxbookBalance! > 0) {
+          if (_numericMyfxbookEquity! < _numericMyfxbookBalance!) {
+            _numericMyfxbookDrawdown =
+                ((_numericMyfxbookBalance! - _numericMyfxbookEquity!) /
+                        _numericMyfxbookBalance!) *
+                    100;
+          } else {
+            _numericMyfxbookDrawdown =
+                0.0; // No drawdown if equity is not less than balance
+          }
+        } else {
+          _numericMyfxbookDrawdown =
+              null; // Cannot calculate if balance or equity is null, or balance is zero
+        }
+
+        if (mounted) {
+          setState(() {
+            myfxbookBalance = _formatNumber(_numericMyfxbookBalance, 2);
+            myfxbookEquity = _formatNumber(_numericMyfxbookEquity, 2);
+            myfxbookDrawdown = _numericMyfxbookDrawdown != null
+                ? "${_formatNumber(_numericMyfxbookDrawdown, 2)}%"
+                : "N/A";
+          });
+        }
+      } else {
+        _numericMyfxbookBalance = null;
+        _numericMyfxbookEquity = null;
+        _numericMyfxbookDrawdown = null;
+        if (mounted) {
+          setState(() {
+            myfxbookBalance = "Error";
+            myfxbookEquity = "Error";
+            myfxbookDrawdown = "Error";
+          });
+        }
+        developer.log("Failed to fetch Myfxbook account details.",
             name: "PortfolioDashboard");
+      }
 
       // 2. Fetch Bitcoin Balance (now always attempts ZPUB derivation)
       final btcBalNum = await _blockchainService.getBitcoinBalance();
@@ -268,6 +315,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
 
         if (mounted) {
           setState(() {
+            btcBalanceInUsd = _formatNumber(btcValueInUsd, 2);
             totalPortfolioValueUsdt = _formatNumber(totalValueUsd, 2);
             totalPortfolioValueThb = calculatedTotalPortfolioValueThb;
 
@@ -292,10 +340,15 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             currentAllocationBtc = "Error";
             currentAllocationMyfxbook = "Error";
             totalPortfolioValueThb = "Error"; // Reset THB total on error
+            myfxbookEquity = "Error"; // Reset Equity on error
+            myfxbookDrawdown = "Error"; // Reset Drawdown on error
+            btcBalanceInUsd = "Error"; // Reset BTC in USD on error
             rebalancingSuggestion = "Could not calculate due to missing data.";
             // Reset numeric values as well on data error
             _numericBtcBalance = null;
             _numericMyfxbookBalance = null;
+            _numericMyfxbookEquity = null;
+            _numericMyfxbookDrawdown = null;
             _numericBtcTargetCurrencyRate = null;
           });
         }
@@ -307,6 +360,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
         setState(() {
           btcBalance = "Error";
           myfxbookBalance = "Error";
+          myfxbookEquity = "Error";
+          myfxbookDrawdown = "Error";
+          btcBalanceInUsd = "Error";
           btcTargetCurrencyRate = "Error";
           usdtTargetCurrencyRate = "Error";
           totalPortfolioValueUsdt = "Error";
@@ -318,6 +374,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           // Reset numeric values on exception
           _numericBtcBalance = null;
           _numericMyfxbookBalance = null;
+          _numericMyfxbookEquity = null;
+          _numericMyfxbookDrawdown = null;
           _numericBtcTargetCurrencyRate = null;
         });
       }
@@ -525,14 +583,20 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
               title: 'Portfolio Overview',
               children: [
                 _buildInfoRow(context, 'BTC Balance:', btcBalance),
+                _buildInfoRow(context, 'BTC Balance (USDT):', btcBalanceInUsd),
                 _buildInfoRow(
                     context,
                     'Myfxbook Balance ($_targetDisplayCurrency):',
                     myfxbookBalance),
+                _buildInfoRow(
+                    context,
+                    'Myfxbook Equity ($_targetDisplayCurrency):',
+                    myfxbookEquity),
+                _buildInfoRow(context, 'Myfxbook Drawdown:', myfxbookDrawdown),
                 _buildInfoRow(context, 'Total Portfolio Value (USDT):',
                     totalPortfolioValueUsdt),
                 _buildInfoRow(context, 'Total Portfolio Value (THB):',
-                    totalPortfolioValueThb), // Added THB total display
+                    totalPortfolioValueThb),
               ],
             ),
             const SizedBox(height: 16),
@@ -554,8 +618,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
                     btcTargetCurrencyRate),
                 _buildInfoRow(context, 'USDT/$_targetDisplayCurrency:',
                     usdtTargetCurrencyRate),
-                _buildInfoRow(context, 'USDT/THB:',
-                    usdtToThbRate), // Added USDT/THB rate display
+                _buildInfoRow(context, 'USDT/THB:', usdtToThbRate),
               ],
             ),
             const SizedBox(height: 24),

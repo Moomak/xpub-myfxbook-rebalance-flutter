@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'settings_service.dart';
+import 'dart:developer' as developer;
 
 class MyfxbookService {
   final String _baseUrl = "https://www.myfxbook.com/api";
@@ -12,8 +13,9 @@ class MyfxbookService {
     String? password = await _settingsService.getMyfxbookPassword();
 
     if (_sessionKey != null && _sessionKey!.isNotEmpty) {
-      print(
-          "Existing Myfxbook session key found: $_sessionKey. Will try to use this first.");
+      developer.log(
+          "Existing Myfxbook session key found: $_sessionKey. Will try to use this first.",
+          name: "MyfxbookService");
       return true;
     }
 
@@ -21,7 +23,8 @@ class MyfxbookService {
         email.isEmpty ||
         password == null ||
         password.isEmpty) {
-      print("Myfxbook credentials not configured in settings.");
+      developer.log("Myfxbook credentials not configured in settings.",
+          name: "MyfxbookService");
       return false;
     }
 
@@ -33,39 +36,42 @@ class MyfxbookService {
         final data = jsonDecode(response.body);
         if (data['error'] == false && data['session'] != null) {
           _sessionKey = data['session'];
-          print('Myfxbook login successful. Session: $_sessionKey');
+          developer.log('Myfxbook login successful. Session: $_sessionKey',
+              name: "MyfxbookService");
           await _settingsService.saveMyfxbookSessionKey(_sessionKey!);
           return true;
         } else {
-          print('Myfxbook login failed: ${data['message']}');
+          developer.log('Myfxbook login failed: ${data['message']}',
+              name: "MyfxbookService");
           _sessionKey = null;
           await _settingsService.clearMyfxbookSessionKey();
         }
       } else {
-        print(
-            'Myfxbook API Error (login): ${response.statusCode} - ${response.body}');
+        developer.log(
+            'Myfxbook API Error (login): ${response.statusCode} - ${response.body}',
+            name: "MyfxbookService");
       }
     } catch (e) {
-      print('Error during Myfxbook login: $e');
+      developer.log('Error during Myfxbook login: $e', name: "MyfxbookService");
     }
     return false;
   }
 
-  Future<double?> getAccountBalance() async {
+  Future<Map<String, dynamic>?> getAccountDetails() async {
     _sessionKey = await _settingsService.getMyfxbookSessionKey();
 
     if (_sessionKey == null) {
-      print(
-          'Not logged into Myfxbook or session expired. Attempting to log in.');
+      developer.log(
+          'Not logged into Myfxbook or session expired. Attempting to log in.',
+          name: "MyfxbookService");
       bool loggedIn = await login();
       if (!loggedIn || _sessionKey == null) {
         return null;
       }
-      // After a successful login, re-fetch the session key that was saved by login()
       _sessionKey = await _settingsService.getMyfxbookSessionKey();
       if (_sessionKey == null) {
-        // Still null after login attempt, something went wrong
-        print("Failed to establish a session even after login attempt.");
+        developer.log("Failed to establish a session even after login attempt.",
+            name: "MyfxbookService");
         return null;
       }
     }
@@ -79,65 +85,89 @@ class MyfxbookService {
         if (data['error'] == false && data['accounts'] != null) {
           List<dynamic> accounts = data['accounts'];
           if (accounts.isEmpty) {
-            print("No accounts found on Myfxbook.");
+            developer.log("No accounts found on Myfxbook.",
+                name: "MyfxbookService");
             return null;
           }
 
-          Map<String, dynamic>? targetAccount;
-          // Fetch target account name from settings
+          Map<String, dynamic>? targetAccountData;
           final String? accNameToFindFromSettings =
               await _settingsService.getTargetAccountName();
 
+          Map<String, dynamic>? selectedAccountJson;
+
           if (accNameToFindFromSettings != null &&
               accNameToFindFromSettings.isNotEmpty) {
-            targetAccount = accounts.firstWhere(
+            selectedAccountJson = accounts.firstWhere(
               (acc) => acc['name'] == accNameToFindFromSettings,
               orElse: () => null,
             );
-            if (targetAccount == null) {
-              print(
-                  "Target account '$accNameToFindFromSettings' (from settings) not found. Found accounts: ${accounts.map((a) => a['name']).toList()}");
-              // Fallback to first account if specific one from settings not found
+            if (selectedAccountJson == null) {
+              developer.log(
+                  "Target account '$accNameToFindFromSettings' (from settings) not found. Found accounts: ${accounts.map((a) => a['name']).toList()}",
+                  name: "MyfxbookService");
               if (accounts.isNotEmpty) {
-                print(
-                    "Falling back to the first available account: ${accounts.first['name']}");
-                targetAccount = accounts.first;
+                developer.log(
+                    "Falling back to the first available account: ${accounts.first['name']}",
+                    name: "MyfxbookService");
+                selectedAccountJson = accounts.first;
               }
             }
           } else if (accounts.isNotEmpty) {
-            // If no target name specified in settings, use the first account
-            targetAccount = accounts.first;
-            print(
-                "No specific account name in settings, using first account: ${targetAccount?['name']}");
+            selectedAccountJson = accounts.first;
+            developer.log(
+                "No specific account name in settings, using first account: ${selectedAccountJson?['name']}",
+                name: "MyfxbookService");
           }
 
-          if (targetAccount != null && targetAccount['balance'] != null) {
-            return (targetAccount['balance'] as num).toDouble();
+          if (selectedAccountJson != null) {
+            developer.log(
+                "Selected Myfxbook Account Data: ${jsonEncode(selectedAccountJson)}",
+                name: "MyfxbookService.AccountData");
+
+            double? balance =
+                (selectedAccountJson['balance'] as num?)?.toDouble();
+            double? equity =
+                (selectedAccountJson['equity'] as num?)?.toDouble();
+            double? drawdown =
+                (selectedAccountJson['drawdown'] as num?)?.toDouble() ??
+                    (selectedAccountJson['dd'] as num?)?.toDouble();
+
+            if (balance != null && equity != null) {
+              return {
+                'balance': balance,
+                'equity': equity,
+                'drawdown': drawdown,
+              };
+            } else {
+              developer.log(
+                  "Balance or Equity is null for selected account. Balance: $balance, Equity: $equity",
+                  name: "MyfxbookService");
+            }
           }
         } else {
-          print('Myfxbook get accounts error: ${data['message']}');
+          developer.log('Myfxbook get accounts error: ${data['message']}',
+              name: "MyfxbookService");
           if (data['message'] == 'Invalid session.') {
-            // Handle session expiry
-            _sessionKey = null; // Clear session key to force re-login next time
+            _sessionKey = null;
             await _settingsService.clearMyfxbookSessionKey();
           }
         }
       } else {
-        print(
-            'Myfxbook API Error (get-my-accounts): ${response.statusCode} - ${response.body}');
+        developer.log(
+            'Myfxbook API Error (get-my-accounts): ${response.statusCode} - ${response.body}',
+            name: "MyfxbookService");
       }
-    } catch (e) {
-      print('Error fetching Myfxbook account balance: $e');
+    } catch (e, s) {
+      developer.log('Error fetching Myfxbook account details: $e',
+          stackTrace: s, name: "MyfxbookService");
     }
     return null;
   }
 
-  // Call this to clear session if needed, e.g., on app exit or manual logout
   void logout() {
     _sessionKey = null;
     _settingsService.clearMyfxbookSessionKey();
-    print("Myfxbook session cleared.");
-    // Myfxbook does not seem to have an explicit logout API endpoint
-    // Clearing the session key locally is usually sufficient.
+    developer.log("Myfxbook session cleared.", name: "MyfxbookService");
   }
 }
