@@ -353,9 +353,31 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           });
         }
       }
-    } catch (e) {
-      developer.log('Error in _loadPortfolioData: $e',
+    } on MyfxbookLoginException catch (e) {
+      // Catch specific Myfxbook login errors
+      developer.log('Myfxbook Login Error in UI: ${e.message}',
           name: "PortfolioDashboard");
+      if (mounted) {
+        setState(() {
+          myfxbookBalance = "Login Failed";
+          myfxbookEquity = "N/A";
+          myfxbookDrawdown = "N/A";
+          // Potentially reset other Myfxbook dependent fields if necessary
+          rebalancingSuggestion =
+              "Myfxbook Login Failed. Please check credentials in settings.";
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Myfxbook Login Failed: ${e.message}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e, s) {
+      // Catch all other errors
+      developer.log('Error in _loadPortfolioData: $e',
+          name: "PortfolioDashboard", stackTrace: s);
       if (mounted) {
         setState(() {
           btcBalance = "Error";

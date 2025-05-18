@@ -3,12 +3,20 @@ import 'package:http/http.dart' as http;
 import 'settings_service.dart';
 import 'dart:developer' as developer;
 
+class MyfxbookLoginException implements Exception {
+  final String message;
+  MyfxbookLoginException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 class MyfxbookService {
   final String _baseUrl = "https://www.myfxbook.com/api";
   String? _sessionKey;
   final SettingsService _settingsService = SettingsService();
 
-  Future<bool> login() async {
+  Future<void> login() async {
     String? email = await _settingsService.getMyfxbookEmail();
     String? password = await _settingsService.getMyfxbookPassword();
 
@@ -16,7 +24,7 @@ class MyfxbookService {
       developer.log(
           "Existing Myfxbook session key found: $_sessionKey. Will try to use this first.",
           name: "MyfxbookService");
-      return true;
+      return;
     }
 
     if (email == null ||
@@ -25,7 +33,8 @@ class MyfxbookService {
         password.isEmpty) {
       developer.log("Myfxbook credentials not configured in settings.",
           name: "MyfxbookService");
-      return false;
+      throw MyfxbookLoginException(
+          "Myfxbook credentials not configured in settings.");
     }
 
     final Uri url =
@@ -39,22 +48,29 @@ class MyfxbookService {
           developer.log('Myfxbook login successful. Session: $_sessionKey',
               name: "MyfxbookService");
           await _settingsService.saveMyfxbookSessionKey(_sessionKey!);
-          return true;
+          return;
         } else {
-          developer.log('Myfxbook login failed: ${data['message']}',
+          String errorMessage = data['message'] ??
+              "Myfxbook login failed due to an unknown API error.";
+          developer.log('Myfxbook login failed: $errorMessage',
               name: "MyfxbookService");
           _sessionKey = null;
           await _settingsService.clearMyfxbookSessionKey();
+          throw MyfxbookLoginException(errorMessage);
         }
       } else {
-        developer.log(
-            'Myfxbook API Error (login): ${response.statusCode} - ${response.body}',
-            name: "MyfxbookService");
+        String errorMsg =
+            'Myfxbook API Error (login): ${response.statusCode} - ${response.body}';
+        developer.log(errorMsg, name: "MyfxbookService");
+        throw MyfxbookLoginException(
+            'Myfxbook API Error (login): ${response.statusCode}');
       }
     } catch (e) {
+      if (e is MyfxbookLoginException) rethrow;
       developer.log('Error during Myfxbook login: $e', name: "MyfxbookService");
+      throw MyfxbookLoginException(
+          "An unexpected error occurred during Myfxbook login.");
     }
-    return false;
   }
 
   Future<Map<String, dynamic>?> getAccountDetails() async {
@@ -64,15 +80,13 @@ class MyfxbookService {
       developer.log(
           'Not logged into Myfxbook or session expired. Attempting to log in.',
           name: "MyfxbookService");
-      bool loggedIn = await login();
-      if (!loggedIn || _sessionKey == null) {
-        return null;
-      }
+      await login();
       _sessionKey = await _settingsService.getMyfxbookSessionKey();
       if (_sessionKey == null) {
-        developer.log("Failed to establish a session even after login attempt.",
+        developer.log(
+            "Failed to establish a session even after login attempt (session key still null).",
             name: "MyfxbookService");
-        return null;
+        throw MyfxbookLoginException("Failed to establish Myfxbook session.");
       }
     }
 
