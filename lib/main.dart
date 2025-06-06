@@ -4,6 +4,7 @@ import 'services/coingecko_service.dart';
 import 'services/blockchain_service.dart';
 import 'services/myfxbook_service.dart';
 import 'services/settings_service.dart'; // Added SettingsService import
+import 'services/binance_service.dart'; // Import BinanceService
 import 'screens/settings_screen.dart'; // Added SettingsScreen import
 import 'dart:developer' as developer; // For console logging
 
@@ -40,6 +41,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   final CoinGeckoService _coinGeckoService = CoinGeckoService();
   final BlockchainService _blockchainService = BlockchainService();
   final MyfxbookService _myfxbookService = MyfxbookService();
+  final BinanceService _binanceService =
+      BinanceService(); // Add BinanceService instance
   final SettingsService _settingsService =
       SettingsService(); // Added SettingsService instance
 
@@ -58,6 +61,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   String currentAllocationMyfxbook = "N/A";
   String totalPortfolioValueThb = "N/A"; // Added for THB total
   String usdtToThbRate = "N/A"; // Added for USDT/THB rate
+  String binanceBtcBalance = "N/A";
+  String binanceUsdtBalance = "N/A";
+  String btcBalanceInThb = "N/A";
   String rebalancingSuggestion = "Load data to see suggestions.";
 
   // Numeric state variables for calculations
@@ -66,6 +72,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   double? _numericMyfxbookEquity; // Added for Myfxbook Equity
   double? _numericMyfxbookDrawdown; // Added for Myfxbook Drawdown
   double? _numericBtcTargetCurrencyRate;
+  double? _numericBinanceBtcBalance;
+  double? _numericBinanceUsdtBalance;
   // double? _numericUsdtTargetCurrencyRate; // For consistency if used later
 
   late TextEditingController
@@ -122,13 +130,19 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
     final email = await _settingsService.getMyfxbookEmail();
     final password = await _settingsService.getMyfxbookPassword();
     final zpub = await _settingsService.getZpubKey();
+    final binanceApiKey = await _settingsService.getBinanceApiKey();
+    final binanceApiSecret = await _settingsService.getBinanceApiSecret();
 
     final bool configured = email != null &&
         email.isNotEmpty &&
         password != null &&
         password.isNotEmpty &&
         zpub != null &&
-        zpub.isNotEmpty;
+        zpub.isNotEmpty &&
+        binanceApiKey != null &&
+        binanceApiKey.isNotEmpty &&
+        binanceApiSecret != null &&
+        binanceApiSecret.isNotEmpty;
 
     if (mounted) {
       setState(() {
@@ -154,8 +168,11 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           currentAllocationMyfxbook = "N/A";
           totalPortfolioValueThb = "N/A";
           usdtToThbRate = "N/A";
+          binanceBtcBalance = "N/A";
+          binanceUsdtBalance = "N/A";
+          btcBalanceInThb = "N/A";
           rebalancingSuggestion =
-              "Please configure critical settings (Myfxbook credentials, ZPUB Key) to view portfolio and suggestions.";
+              "Please configure critical settings (Myfxbook, ZPUB Key, Binance) to view portfolio and suggestions.";
           _isLoading = false; // Finished initial setup, settings not configured
           // Reset numeric values as well
           _numericBtcBalance = null;
@@ -163,6 +180,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           _numericMyfxbookEquity = null;
           _numericMyfxbookDrawdown = null;
           _numericBtcTargetCurrencyRate = null;
+          _numericBinanceBtcBalance = null;
+          _numericBinanceUsdtBalance = null;
         });
       }
     }
@@ -240,19 +259,34 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             name: "PortfolioDashboard");
       }
 
-      // 2. Fetch Bitcoin Balance (now always attempts ZPUB derivation)
-      final btcBalNum = await _blockchainService.getBitcoinBalance();
-      _numericBtcBalance = btcBalNum; // Store numeric value
+      // 2. Fetch Binance Balances
+      final binanceBalances = await _binanceService.getAccountBalances();
+      _numericBinanceBtcBalance = binanceBalances['BTC'];
+      _numericBinanceUsdtBalance = binanceBalances['USDT'];
       if (mounted) {
         setState(() {
-          btcBalance = _formatNumber(btcBalNum, 8);
+          binanceBtcBalance =
+              _formatNumber(_numericBinanceBtcBalance ?? 0.0, 8);
+          binanceUsdtBalance =
+              _formatNumber(_numericBinanceUsdtBalance ?? 0.0, 2);
+        });
+      }
+
+      // 3. Fetch Bitcoin Balance (now always attempts ZPUB derivation)
+      final btcBalNum = await _blockchainService.getBitcoinBalance();
+      // Combine ZPUB and Binance BTC
+      _numericBtcBalance =
+          (btcBalNum ?? 0.0) + (_numericBinanceBtcBalance ?? 0.0);
+      if (mounted) {
+        setState(() {
+          btcBalance = _formatNumber(_numericBtcBalance, 8);
         });
       }
       if (btcBalNum == null)
         developer.log("Failed to fetch BTC balance (check ZPUB derivation).",
             name: "PortfolioDashboard");
 
-      // 3. Fetch Exchange Rates (BTC/USD and USDT/USD - assuming TARGET_CURRENCY from config is 'usd')
+      // 4. Fetch Exchange Rates (BTC/USD and USDT/USD - assuming TARGET_CURRENCY from config is 'usd')
       // CoinGecko IDs: bitcoin, tether
       // Original PHP used TARGET_CURRENCY for intermediate, then converted to USDT for total.
       // Here, we aim for BTC/TARGET_CURRENCY and USDT/TARGET_CURRENCY for display,
@@ -287,35 +321,43 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
         developer.log("Failed to fetch USDT/$displayCurrencyThb rate.",
             name: "PortfolioDashboard");
 
-      // 4. Calculate Total Portfolio Value in USDT
+      // 5. Calculate Total Portfolio Value in USDT
       // and Current Allocation
       // Also calculate Total Portfolio Value in THB
       if (_numericBtcBalance != null &&
-          _numericMyfxbookBalance != null &&
-          _numericBtcTargetCurrencyRate !=
-              null /* and usdtRate != null if needed for conversion */) {
+          _numericMyfxbookEquity != null && // Use equity for rebalancing
+          _numericBtcTargetCurrencyRate != null) {
         // Assuming Myfxbook balance is already in USD (as per typical Myfxbook display)
         // If Myfxbook is in another currency, it would need conversion using its own rate.
         // For now, let's assume Myfxbook balance is in USD.
+        // Use Myfxbook Equity for calculations as it's more representative
 
         double btcValueInUsd =
             _numericBtcBalance! * _numericBtcTargetCurrencyRate!;
-        double myfxbookValueInUsd =
-            _numericMyfxbookBalance!; // Assuming Myfxbook balance is already in USD
+        // Use Myfxbook Equity and add Binance USDT balance to it
+        double myfxbookValueInUsd = _numericMyfxbookEquity!;
+        double totalFiatEquivalentValue =
+            myfxbookValueInUsd + (_numericBinanceUsdtBalance ?? 0.0);
 
         // Total portfolio value in USD. Since USDT is pegged to USD, this is also approx total value in USDT.
-        double totalValueUsd = btcValueInUsd + myfxbookValueInUsd;
+        double totalValueUsd = btcValueInUsd + totalFiatEquivalentValue;
 
         // Calculate Total Portfolio Value in THB
         String calculatedTotalPortfolioValueThb = "Error";
-        if (usdtThbRateDataNum != null && totalValueUsd > 0) {
-          calculatedTotalPortfolioValueThb =
-              _formatNumber((totalValueUsd * usdtThbRateDataNum), 2);
+        String calculatedBtcBalanceInThb = "Error";
+        if (usdtThbRateDataNum != null) {
+          calculatedBtcBalanceInThb =
+              _formatNumber((btcValueInUsd * usdtThbRateDataNum), 2);
+          if (totalValueUsd > 0) {
+            calculatedTotalPortfolioValueThb =
+                _formatNumber((totalValueUsd * usdtThbRateDataNum), 2);
+          }
         }
 
         if (mounted) {
           setState(() {
             btcBalanceInUsd = _formatNumber(btcValueInUsd, 2);
+            btcBalanceInThb = calculatedBtcBalanceInThb;
             totalPortfolioValueUsdt = _formatNumber(totalValueUsd, 2);
             totalPortfolioValueThb = calculatedTotalPortfolioValueThb;
 
@@ -324,7 +366,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
                   ((btcValueInUsd / totalValueUsd) * 100), 1,
                   useCommas: false);
               currentAllocationMyfxbook = _formatNumber(
-                  ((myfxbookValueInUsd / totalValueUsd) * 100), 1,
+                  ((totalFiatEquivalentValue / totalValueUsd) * 100), 1,
                   useCommas: false);
             } else {
               currentAllocationBtc = "0";
@@ -332,7 +374,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             }
           });
         }
-        _updateRebalancingSuggestion(btcValueInUsd, myfxbookValueInUsd);
+        _updateRebalancingSuggestion(btcValueInUsd, totalFiatEquivalentValue);
       } else {
         if (mounted) {
           setState(() {
@@ -343,6 +385,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             myfxbookEquity = "Error"; // Reset Equity on error
             myfxbookDrawdown = "Error"; // Reset Drawdown on error
             btcBalanceInUsd = "Error"; // Reset BTC in USD on error
+            btcBalanceInThb = "Error";
+            binanceBtcBalance = "Error";
+            binanceUsdtBalance = "Error";
             rebalancingSuggestion = "Could not calculate due to missing data.";
             // Reset numeric values as well on data error
             _numericBtcBalance = null;
@@ -350,6 +395,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             _numericMyfxbookEquity = null;
             _numericMyfxbookDrawdown = null;
             _numericBtcTargetCurrencyRate = null;
+            _numericBinanceBtcBalance = null;
+            _numericBinanceUsdtBalance = null;
           });
         }
       }
@@ -392,6 +439,9 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           currentAllocationMyfxbook = "Error";
           totalPortfolioValueThb = "Error"; // Reset THB total on error
           usdtToThbRate = "Error"; // Reset USDT/THB rate on error
+          btcBalanceInThb = "Error";
+          binanceBtcBalance = "Error";
+          binanceUsdtBalance = "Error";
           rebalancingSuggestion = "An error occurred while loading data.";
           // Reset numeric values on exception
           _numericBtcBalance = null;
@@ -399,6 +449,8 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
           _numericMyfxbookEquity = null;
           _numericMyfxbookDrawdown = null;
           _numericBtcTargetCurrencyRate = null;
+          _numericBinanceBtcBalance = null;
+          _numericBinanceUsdtBalance = null;
         });
       }
     } finally {
@@ -413,11 +465,12 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
   void _updateAndRebalance() {
     _loadPortfolioData().then((_) {
       if (_numericBtcBalance != null &&
-          _numericMyfxbookBalance != null &&
+          _numericMyfxbookEquity != null &&
           _numericBtcTargetCurrencyRate != null) {
         double btcValueInUsd =
             _numericBtcBalance! * _numericBtcTargetCurrencyRate!;
-        double myfxbookValueInUsd = _numericMyfxbookBalance!;
+        double myfxbookValueInUsd =
+            _numericMyfxbookEquity! + (_numericBinanceUsdtBalance ?? 0.0);
         _updateRebalancingSuggestion(btcValueInUsd, myfxbookValueInUsd);
       } else {
         if (mounted) {
@@ -487,11 +540,11 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
       displayRatio = parsedRatio.toInt().toString();
     }
 
-    String suggestionText = "Target Ratio: ${displayRatio}:1 (BTC:Myfxbook)\n";
+    String suggestionText = "Target Ratio: ${displayRatio}:1 (BTC:Fiat)\n";
     suggestionText +=
-        "Current: BTC \$${_formatNumber(currentBtcValueUsd, 2)}, Myfxbook \$${_formatNumber(currentMyfxbookValueUsd, 2)}\n";
+        "Current: BTC \$${_formatNumber(currentBtcValueUsd, 2)}, Fiat Equivalent \$${_formatNumber(currentMyfxbookValueUsd, 2)}\n";
     suggestionText +=
-        "Desired: BTC \$${_formatNumber(desiredBtcValue, 2)}, Myfxbook \$${_formatNumber(desiredMyfxbookValue, 2)}\n\n";
+        "Desired: BTC \$${_formatNumber(desiredBtcValue, 2)}, Fiat Equivalent \$${_formatNumber(desiredMyfxbookValue, 2)}\n\n";
 
     if (diffBtc.abs() < 0.01 && diffMyfxbook.abs() < 0.01) {
       suggestionText +=
@@ -558,7 +611,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Text(
-                'Please configure critical settings (Myfxbook credentials, ZPUB Key) to view your portfolio.',
+                'Please configure critical settings (Myfxbook, ZPUB Key, Binance) to view your portfolio.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16),
               ),
@@ -604,8 +657,12 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
               context,
               title: 'Portfolio Overview',
               children: [
-                _buildInfoRow(context, 'BTC Balance:', btcBalance),
+                _buildInfoRow(
+                    context, 'BTC Balance (on-chain + Binance):', btcBalance),
+                _buildInfoRow(
+                    context, 'Binance USDT Balance:', binanceUsdtBalance),
                 _buildInfoRow(context, 'BTC Balance (USDT):', btcBalanceInUsd),
+                _buildInfoRow(context, 'BTC Balance (THB):', btcBalanceInThb),
                 _buildInfoRow(
                     context,
                     'Myfxbook Balance ($_targetDisplayCurrency):',
@@ -628,7 +685,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
               children: [
                 _buildInfoRow(context, 'BTC:', '$currentAllocationBtc%'),
                 _buildInfoRow(
-                    context, 'Myfxbook:', '$currentAllocationMyfxbook%'),
+                    context, 'Myfxbook + Fiat:', '$currentAllocationMyfxbook%'),
               ],
             ),
             const SizedBox(height: 16),
@@ -654,7 +711,7 @@ class _PortfolioDashboardScreenState extends State<PortfolioDashboardScreen> {
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
-                labelText: 'Target BTC:Myfxbook Ratio (e.g., 1.0 for 1:1)',
+                labelText: 'Target BTC:Fiat Ratio (e.g., 1.0 for 1:1)',
                 border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _updateAndRebalance(),

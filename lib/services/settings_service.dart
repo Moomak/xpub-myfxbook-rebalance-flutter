@@ -9,6 +9,8 @@ class SettingsService {
   static const String targetRatioKey =
       'target_ratio'; // For the ratio on main screen
   static const String targetAccountNameKey = 'myfxbook_target_account_name';
+  static const String binanceApiKey = 'binance_api_key';
+  static const String binanceApiSecret = 'binance_api_secret';
 
   Future<SharedPreferences> _getPrefs() async {
     return await SharedPreferences.getInstance();
@@ -78,4 +80,12 @@ class SettingsService {
   Future<String?> getTargetAccountName() => getString(targetAccountNameKey);
   Future<void> saveTargetAccountName(String name) =>
       saveString(targetAccountNameKey, name);
+
+  // Binance API Keys
+  Future<String?> getBinanceApiKey() => getString(binanceApiKey);
+  Future<void> saveBinanceApiKey(String key) => saveString(binanceApiKey, key);
+
+  Future<String?> getBinanceApiSecret() => getString(binanceApiSecret);
+  Future<void> saveBinanceApiSecret(String secret) =>
+      saveString(binanceApiSecret, secret);
 }

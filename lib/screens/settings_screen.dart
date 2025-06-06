@@ -19,6 +19,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _addressDiscoveryLimitController;
   late TextEditingController _targetRatioController;
   late TextEditingController _targetAccountNameController;
+  late TextEditingController _binanceApiKeyController;
+  late TextEditingController _binanceApiSecretController;
 
   bool _isLoading = false;
 
@@ -31,6 +33,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _addressDiscoveryLimitController = TextEditingController();
     _targetRatioController = TextEditingController();
     _targetAccountNameController = TextEditingController();
+    _binanceApiKeyController = TextEditingController();
+    _binanceApiSecretController = TextEditingController();
     _loadSettings();
   }
 
@@ -48,6 +52,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await _settingsService.getTargetRatio(defaultValue: "2.0");
     _targetAccountNameController.text =
         await _settingsService.getTargetAccountName() ?? '';
+    _binanceApiKeyController.text =
+        await _settingsService.getBinanceApiKey() ?? '';
+    _binanceApiSecretController.text =
+        await _settingsService.getBinanceApiSecret() ?? '';
     setState(() => _isLoading = false);
   }
 
@@ -63,6 +71,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _settingsService.saveTargetRatio(_targetRatioController.text);
       await _settingsService
           .saveTargetAccountName(_targetAccountNameController.text);
+      await _settingsService.saveBinanceApiKey(_binanceApiKeyController.text);
+      await _settingsService
+          .saveBinanceApiSecret(_binanceApiSecretController.text);
       setState(() => _isLoading = false);
 
       if (mounted) {
@@ -81,6 +92,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _addressDiscoveryLimitController.dispose();
     _targetRatioController.dispose();
     _targetAccountNameController.dispose();
+    _binanceApiKeyController.dispose();
+    _binanceApiSecretController.dispose();
     super.dispose();
   }
 
@@ -157,6 +170,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       labelText: 'Target Myfxbook Account Name (Optional)',
                       hintText: 'Leave blank to use the first account found',
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _binanceApiKeyController,
+                    decoration:
+                        const InputDecoration(labelText: 'Binance API Key'),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _binanceApiSecretController,
+                    decoration:
+                        const InputDecoration(labelText: 'Binance API Secret'),
+                    obscureText: true,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
